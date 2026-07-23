@@ -1,0 +1,23 @@
+# Projet Xcode généré par XcodeGen (https://github.com/yonaskolb/XcodeGen).
+#   cd ios && xcodegen generate && open ClipSync.xcodeproj
+name: ClipSync
+options:
+  bundleIdPrefix: com.pierre.clipsync
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  ClipSync:
+    type: application
+    platform: iOS
+    sources:
+      - ClipSync
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.pierre.clipsync
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: ClipSync
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
