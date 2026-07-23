@@ -4,6 +4,7 @@
 // Le serveur route les messages mais est prévu pour ne jamais voir le contenu
 // en clair une fois le chiffrement de bout en bout branché (payloads opaques).
 
+import { randomUUID } from 'node:crypto';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import { config } from './config.js';
@@ -55,6 +56,38 @@ app.get('/files/:id', async (req, reply) => {
 
   reply.header('content-type', f.contentType);
   return reply.send(f.buf);
+});
+
+// --- Envoi d'un clip en HTTP (Raccourci Apple / App Intent / app fermée) -----
+// Permet d'envoyer sans WebSocket : idéal pour un déclencheur en arrière-plan.
+app.post('/clip', async (req, reply) => {
+  const accountId = authHttp(req);
+  if (!accountId) return reply.code(401).send({ error: 'unauthorized' });
+
+  const body = req.body ?? {};
+  const { contentType, text, fileId, fileType, targets, meta, deviceId, deviceName } = body;
+  if (!contentType) return reply.code(400).send({ error: 'missing contentType' });
+
+  const senderId = deviceId ?? 'http-sender';
+  const resolved = registry.resolveTargets(accountId, senderId, targets ?? 'all');
+  const relayed = JSON.stringify({
+    type: 'clip',
+    messageId: randomUUID(),
+    contentType, // 'text' | 'image'
+    text,
+    fileId,
+    fileType,
+    meta: meta ?? {},
+    from: { deviceId: senderId, name: deviceName ?? 'iPhone' },
+    ts: Date.now(),
+  });
+
+  let delivered = 0;
+  for (const dev of resolved) {
+    safeSend(dev.socket, relayed);
+    delivered++;
+  }
+  return { delivered, targets: resolved.map((t) => t.id) };
 });
 
 // --- WebSocket temps réel ---------------------------------------------------
