@@ -6,8 +6,8 @@ namespace ClipSync;
 // MVP : valeurs de démo par défaut pour se connecter au serveur local.
 public sealed class Config
 {
-    public string ServerUrl { get; set; } = "ws://localhost:8787/ws";
-    public string HttpUrl { get; set; } = "http://localhost:8787";
+    public string ServerUrl { get; set; } = "wss://clip.lateliercbd.com/ws";
+    public string HttpUrl { get; set; } = "https://clip.lateliercbd.com";
     public string AccountId { get; set; } = "";
     public string Secret { get; set; } = "";
     public string DeviceId { get; set; } = "";
