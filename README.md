@@ -26,6 +26,23 @@ avec statut de présence des appareils et confirmation « prêt à coller ».
 - **iPhone → Windows** : déclenché par un geste (triple-tap au dos, menu Partager, Centre de contrôle),
   car iOS n'autorise pas la surveillance continue du presse-papiers en arrière-plan.
 
+## Télécharger et utiliser
+
+**iPhone** — ouvre **https://clip.lateliercbd.com** dans Safari → Partager → « Sur l'écran
+d'accueil ». C'est une **PWA installable**, aucune app à compiler, aucun Mac requis.
+
+**Windows** — télécharge `ClipSync.exe` depuis la
+[page Releases](https://github.com/Pierre542A/clipsync/releases). Exécutable **autonome**
+(aucune installation de .NET requise), il vit dans la zone de notification.
+> ⚠️ L'exe n'est pas signé : au 1er lancement, SmartScreen affiche un avertissement →
+> « Informations complémentaires » → « Exécuter quand même ».
+
+Mets le **même identifiant de compte + secret** sur l'iPhone (Réglages de la PWA) et sur
+Windows (`%APPDATA%\ClipSync\config.json`) : le presse-papiers est chiffré de bout en bout.
+
+**Héberger ta propre instance** (optionnel, pour être 100 % indépendant) : tout est
+self-hostable — voir [`deploy/DEPLOY.md`](deploy/DEPLOY.md) (Docker + Nginx).
+
 ## Composants
 
 | Dossier    | Rôle                        | Stack                                   | État |
