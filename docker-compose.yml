@@ -1,0 +1,19 @@
+name: clipsync
+
+services:
+  # Serveur relais (présence + relais presse-papiers + images temporaires).
+  # Exposé uniquement en local (127.0.0.1) : c'est Nginx qui termine le TLS
+  # et proxifie WSS/HTTPS vers ce port. Choisis un port hôte libre si besoin.
+  relay:
+    build: ./server
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8787
+    ports:
+      - "127.0.0.1:${CLIP_PORT:-8787}:8787"
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
