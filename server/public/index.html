@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ClipSync">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <title>ClipSync</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header>
+    <h1>ClipSync</h1>
+    <button class="icon-btn" id="settingsBtn" aria-label="Réglages">⚙️</button>
+  </header>
+
+  <div class="status">
+    <span class="dot off" id="dot"></span>
+    <span id="statusText">…</span>
+    <span class="spacer"></span>
+    <span id="statusSub"></span>
+  </div>
+
+  <button class="primary" id="send">Envoyer le presse-papiers</button>
+  <p class="hint">Copie un texte, puis touche le bouton.<br>Astuce : assigne cette app au triple-tap au dos.</p>
+
+  <h2>Reçu</h2>
+  <div id="received"><div class="empty">Rien reçu pour l'instant.</div></div>
+
+  <h2>Appareils</h2>
+  <div id="devices"><div class="empty">—</div></div>
+
+  <dialog id="settings">
+    <h3>Réglages</h3>
+    <label>Identifiant de compte</label>
+    <input id="cfgAccount" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="ex. pierre">
+    <label>Secret partagé (identique sur tes PC)</label>
+    <input id="cfgSecret" type="password" placeholder="secret">
+    <label>Nom de cet appareil</label>
+    <input id="cfgName" placeholder="iPhone de Pierre">
+    <div class="dialog-actions">
+      <button class="cancel" id="cfgCancel">Annuler</button>
+      <button class="save" id="cfgSave">Enregistrer</button>
+    </div>
+  </dialog>
+
+  <div id="toast"></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -5,8 +5,11 @@
 // en clair une fois le chiffrement de bout en bout branché (payloads opaques).
 
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
 import { config } from './config.js';
 import { Registry, safeSend } from './registry.js';
 import { FileStore } from './files.js';
@@ -218,6 +221,12 @@ function handle(socket, msg) {
 function err(message) {
   return JSON.stringify({ type: 'error', message });
 }
+
+// --- PWA : fichiers statiques servis à la racine (/, /app.js, /crypto.js, …) -
+await app.register(fastifyStatic, {
+  root: path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public'),
+  prefix: '/',
+});
 
 // Diffusion périodique de la présence (rafraîchit aussi les statuts en/hors ligne).
 const presenceTimer = setInterval(() => {
