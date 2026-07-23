@@ -1,11 +1,14 @@
+using System.Text;
 using System.Text.Json;
 
 namespace ClipSync;
 
 // Application en zone de notification : icône + menu, connexion au relais,
-// surveillance du presse-papiers (envoi) et réception (écriture + notification).
+// surveillance du presse-papiers (envoi texte + image) et réception (écriture + notification).
 public sealed class TrayApp : ApplicationContext
 {
+    private sealed record DeviceInfo(string Name, string Platform, bool Online);
+
     private readonly Config _cfg;
     private readonly NotifyIcon _tray;
     private readonly RelayClient _client;
@@ -13,16 +16,27 @@ public sealed class TrayApp : ApplicationContext
     private readonly Control _marshal = new();
 
     private bool _connected;
-    private int _deviceCount;
-    private string? _suppressNext; // évite de renvoyer un texte qu'on vient d'écrire
+    private List<DeviceInfo> _devices = new();
+
+    // Fenêtre pendant laquelle un changement de presse-papiers est ignoré
+    // (car provoqué par NOTRE écriture d'un clip reçu) → évite la boucle d'écho.
+    private DateTime _suppressUntil = DateTime.MinValue;
 
     public TrayApp()
     {
         _ = _marshal.Handle; // force la création du handle sur le thread UI (pour BeginInvoke)
         _cfg = Config.Load();
 
+        var startupItem = new ToolStripMenuItem("Lancer au démarrage")
+        {
+            Checked = SafeIsStartupEnabled(),
+            CheckOnClick = true,
+        };
+        startupItem.Click += (_, _) => { try { StartupManager.SetEnabled(startupItem.Checked); } catch { } };
+
         var menu = new ContextMenuStrip();
         menu.Items.Add(new ToolStripMenuItem("Ouvrir ClipSync", null, (_, _) => ShowStatus()));
+        menu.Items.Add(startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Quitter", null, (_, _) => Quit()));
 
@@ -40,12 +54,17 @@ public sealed class TrayApp : ApplicationContext
 
         _client = new RelayClient(_cfg);
         _client.ConnectionChanged += c => Post(() => { _connected = c; UpdateTray(); });
-        _client.DevicesUpdated += d => Post(() => { _deviceCount = d.GetArrayLength(); UpdateTray(); });
+        _client.DevicesUpdated += d => Post(() => { ParseDevices(d); UpdateTray(); });
         _client.ClipReceived += clip => Post(() => OnRemoteClip(clip));
         _client.Log += msg => Console.WriteLine("[ClipSync] " + msg);
         _client.Start();
 
         UpdateTray();
+    }
+
+    private static bool SafeIsStartupEnabled()
+    {
+        try { return StartupManager.IsEnabled(); } catch { return false; }
     }
 
     // Marshalle une action vers le thread UI.
@@ -55,58 +74,121 @@ public sealed class TrayApp : ApplicationContext
         catch { /* fermeture en cours */ }
     }
 
+    private void ParseDevices(JsonElement array)
+    {
+        var list = new List<DeviceInfo>();
+        foreach (var e in array.EnumerateArray())
+        {
+            var name = e.TryGetProperty("name", out var n) ? n.GetString() ?? "?" : "?";
+            var platform = e.TryGetProperty("platform", out var p) ? p.GetString() ?? "" : "";
+            var online = e.TryGetProperty("online", out var o) && o.GetBoolean();
+            list.Add(new DeviceInfo(name, platform, online));
+        }
+        _devices = list;
+    }
+
     private void UpdateTray()
     {
+        var online = _devices.Count(d => d.Online);
         _tray.Text = _connected
-            ? $"ClipSync — connecté · {_deviceCount} appareil(s)"
+            ? $"ClipSync — connecté · {online} appareil(s) en ligne"
             : "ClipSync — hors ligne";
     }
 
-    // Presse-papiers Windows modifié → on envoie (texte pour l'instant).
+    // ---- Envoi : presse-papiers Windows modifié -----------------------------
     private void OnLocalClipboardChanged()
     {
+        if (DateTime.UtcNow < _suppressUntil) return; // écho de notre propre écriture
         try
         {
-            if (!Clipboard.ContainsText()) return;
-            var text = Clipboard.GetText();
-            if (string.IsNullOrEmpty(text)) return;
-            if (text == _suppressNext) { _suppressNext = null; return; } // écho d'un clip reçu
-            _ = _client.SendClipText(text);
+            if (Clipboard.ContainsText())
+            {
+                var text = Clipboard.GetText();
+                if (!string.IsNullOrEmpty(text)) _ = _client.SendClipText(text);
+                return;
+            }
+
+            if (Clipboard.ContainsImage())
+            {
+                using var img = Clipboard.GetImage();
+                if (img is null) return;
+                using var ms = new MemoryStream();
+                img.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                var png = ms.ToArray();
+                int w = img.Width, h = img.Height;
+                _ = Task.Run(async () =>
+                {
+                    var fileId = await _client.UploadImageAsync(png, "image/png");
+                    if (!string.IsNullOrEmpty(fileId))
+                        await _client.SendClipImage(fileId, "image/png", w, h);
+                });
+            }
         }
         catch { /* presse-papiers verrouillé par une autre app : on ignore */ }
     }
 
-    // Clip reçu du relais → on écrit dans le presse-papiers + notification.
+    // ---- Réception : clip reçu du relais ------------------------------------
     private void OnRemoteClip(JsonElement clip)
     {
         try
         {
             var type = clip.GetProperty("contentType").GetString();
             var from = clip.TryGetProperty("from", out var f) && f.TryGetProperty("name", out var n)
-                ? n.GetString() : "un appareil";
+                ? n.GetString() ?? "un appareil" : "un appareil";
 
             if (type == "text" && clip.TryGetProperty("text", out var t))
             {
                 var text = t.GetString() ?? "";
                 if (string.IsNullOrEmpty(text)) return;
-                _suppressNext = text;
+                _suppressUntil = DateTime.UtcNow.AddMilliseconds(800);
                 Clipboard.SetText(text);
                 _tray.ShowBalloonTip(4000, "ClipSync",
                     $"Texte reçu de {from} — prêt à coller (Ctrl+V)", ToolTipIcon.Info);
             }
-            // TODO images : télécharger fileId via HTTP puis Clipboard.SetImage.
+            else if (type == "image" && clip.TryGetProperty("fileId", out var fid))
+            {
+                var fileId = fid.GetString();
+                if (string.IsNullOrEmpty(fileId)) return;
+                _ = Task.Run(async () =>
+                {
+                    var bytes = await _client.DownloadFileAsync(fileId);
+                    if (bytes is null) return;
+                    Post(() => ApplyImage(bytes, from));
+                });
+            }
+        }
+        catch { }
+    }
+
+    private void ApplyImage(byte[] bytes, string from)
+    {
+        try
+        {
+            using var ms = new MemoryStream(bytes);
+            using var img = Image.FromStream(ms);
+            _suppressUntil = DateTime.UtcNow.AddMilliseconds(800);
+            Clipboard.SetImage(img);
+            _tray.ShowBalloonTip(4000, "ClipSync",
+                $"Image reçue de {from} — prête à coller (Ctrl+V)", ToolTipIcon.Info);
         }
         catch { }
     }
 
     private void ShowStatus()
     {
-        MessageBox.Show(
-            $"Serveur : {_cfg.ServerUrl}\n" +
-            $"Appareil : {_cfg.DeviceName} ({_cfg.DeviceId})\n" +
-            $"État : {(_connected ? "connecté" : "hors ligne")}\n" +
-            $"Autres appareils : {_deviceCount}",
-            "ClipSync", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Serveur : {_cfg.ServerUrl}");
+        sb.AppendLine($"Cet appareil : {_cfg.DeviceName}");
+        sb.AppendLine($"État : {(_connected ? "connecté" : "hors ligne")}");
+        sb.AppendLine();
+        sb.AppendLine("Appareils associés :");
+        if (_devices.Count == 0)
+            sb.AppendLine("   (aucun autre appareil)");
+        else
+            foreach (var d in _devices)
+                sb.AppendLine($"   {(d.Online ? "●" : "○")} {d.Name} ({d.Platform}) — {(d.Online ? "en ligne" : "hors ligne")}");
+
+        MessageBox.Show(sb.ToString(), "ClipSync", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private void Quit()

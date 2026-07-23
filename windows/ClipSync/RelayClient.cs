@@ -11,6 +11,7 @@ public sealed class RelayClient : IDisposable
     private readonly Config _cfg;
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
+    private readonly HttpClient _http = new();
 
     public event Action<string>? Log;
     public event Action<bool>? ConnectionChanged;      // true = connecté
@@ -131,6 +132,52 @@ public sealed class RelayClient : IDisposable
             targets = "all",
         }, ct);
 
+    public Task SendClipImage(string fileId, string fileType, int width, int height, CancellationToken ct = default) =>
+        SendJson(new
+        {
+            type = "clip",
+            messageId = Guid.NewGuid().ToString(),
+            contentType = "image",
+            fileId,
+            fileType,
+            meta = new { width, height },
+            targets = "all",
+        }, ct);
+
+    // Upload d'une image vers le stockage temporaire du serveur → renvoie le fileId.
+    public async Task<string?> UploadImageAsync(byte[] data, string contentType)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, _cfg.HttpUrl.TrimEnd('/') + "/files");
+            req.Headers.Add("x-account-id", _cfg.AccountId);
+            req.Headers.Add("x-token", _cfg.Secret);
+            req.Headers.Add("x-file-type", contentType);
+            req.Content = new ByteArrayContent(data);
+            req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            using var res = await _http.SendAsync(req);
+            if (!res.IsSuccessStatusCode) return null;
+            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+            return doc.RootElement.GetProperty("fileId").GetString();
+        }
+        catch (Exception ex) { Log?.Invoke("upload : " + ex.Message); return null; }
+    }
+
+    // Téléchargement d'une image depuis le serveur.
+    public async Task<byte[]?> DownloadFileAsync(string fileId)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, _cfg.HttpUrl.TrimEnd('/') + "/files/" + fileId);
+            req.Headers.Add("x-account-id", _cfg.AccountId);
+            req.Headers.Add("x-token", _cfg.Secret);
+            using var res = await _http.SendAsync(req);
+            if (!res.IsSuccessStatusCode) return null;
+            return await res.Content.ReadAsByteArrayAsync();
+        }
+        catch (Exception ex) { Log?.Invoke("download : " + ex.Message); return null; }
+    }
+
     private async Task SendJson(object payload, CancellationToken ct)
     {
         var ws = _ws;
@@ -143,5 +190,6 @@ public sealed class RelayClient : IDisposable
     {
         _cts?.Cancel();
         try { _ws?.Dispose(); } catch { }
+        try { _http.Dispose(); } catch { }
     }
 }
