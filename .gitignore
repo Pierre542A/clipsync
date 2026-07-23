@@ -1,0 +1,29 @@
+# Dépendances
+node_modules/
+
+# Build / sorties
+dist/
+out/
+build/
+windows/out/
+windows/dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environnement / secrets — NE JAMAIS committer
+.env
+.env.*
+secrets.json
+*.key
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+
+# OS / éditeur
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
