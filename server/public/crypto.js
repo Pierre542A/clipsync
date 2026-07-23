@@ -24,6 +24,14 @@ export async function encKey(secret) {
   return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
 }
 
+// Identifiant de compte dérivé de la phrase (unique par phrase → identique sur tous
+// tes appareils, jamais en collision avec un autre utilisateur).
+export async function accountId(phrase) {
+  const h = await crypto.subtle.digest('SHA-256', enc.encode('clipsync-acct-v1:' + phrase));
+  const hex = [...new Uint8Array(h)].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return 'u-' + hex.slice(0, 16);
+}
+
 export async function encryptBytes(key, data) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data)); // ct‖tag

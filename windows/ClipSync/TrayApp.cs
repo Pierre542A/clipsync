@@ -1,30 +1,30 @@
-using System.Text;
 using System.Text.Json;
 
 namespace ClipSync;
 
-// Application en zone de notification : icône + menu, connexion au relais,
-// surveillance du presse-papiers (envoi texte + image) et réception (écriture + notification).
+// Application en zone de notification : icône + menu + vraie fenêtre.
+// 1er lancement -> demande la phrase de couplage. Surveillance presse-papiers (envoi)
+// et réception (écriture + notification). Chiffrement de bout en bout via RelayClient.
 public sealed class TrayApp : ApplicationContext
 {
     private sealed record DeviceInfo(string Name, string Platform, bool Online);
 
     private readonly Config _cfg;
     private readonly NotifyIcon _tray;
-    private readonly RelayClient _client;
     private readonly ClipboardWatcher _watcher;
     private readonly Control _marshal = new();
 
+    private RelayClient? _client;
+    private MainForm? _mainForm;
+    private bool _settingsOpen;
+
     private bool _connected;
     private List<DeviceInfo> _devices = new();
-
-    // Fenêtre pendant laquelle un changement de presse-papiers est ignoré
-    // (car provoqué par NOTRE écriture d'un clip reçu) → évite la boucle d'écho.
     private DateTime _suppressUntil = DateTime.MinValue;
 
     public TrayApp()
     {
-        _ = _marshal.Handle; // force la création du handle sur le thread UI (pour BeginInvoke)
+        _ = _marshal.Handle; // handle UI pour BeginInvoke
         _cfg = Config.Load();
 
         var startupItem = new ToolStripMenuItem("Lancer au démarrage")
@@ -35,7 +35,8 @@ public sealed class TrayApp : ApplicationContext
         startupItem.Click += (_, _) => { try { StartupManager.SetEnabled(startupItem.Checked); } catch { } };
 
         var menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripMenuItem("Ouvrir ClipSync", null, (_, _) => ShowStatus()));
+        menu.Items.Add(new ToolStripMenuItem("Ouvrir ClipSync", null, (_, _) => ShowMain()));
+        menu.Items.Add(new ToolStripMenuItem("Réglages…", null, (_, _) => ShowSettings()));
         menu.Items.Add(startupItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(new ToolStripMenuItem("Quitter", null, (_, _) => Quit()));
@@ -44,20 +45,18 @@ public sealed class TrayApp : ApplicationContext
         {
             Icon = SystemIcons.Application,
             Visible = true,
-            Text = "ClipSync — connexion…",
+            Text = "ClipSync",
             ContextMenuStrip = menu,
         };
-        _tray.DoubleClick += (_, _) => ShowStatus();
+        _tray.DoubleClick += (_, _) => ShowMain();
 
         _watcher = new ClipboardWatcher();
         _watcher.ClipboardChanged += OnLocalClipboardChanged;
 
-        _client = new RelayClient(_cfg);
-        _client.ConnectionChanged += c => Post(() => { _connected = c; UpdateTray(); });
-        _client.DevicesUpdated += d => Post(() => { ParseDevices(d); UpdateTray(); });
-        _client.ClipReceived += clip => Post(() => OnRemoteClip(clip));
-        _client.Log += msg => Console.WriteLine("[ClipSync] " + msg);
-        _client.Start();
+        if (_cfg.IsConfigured)
+            StartClient();
+        else
+            Post(ShowSettings); // 1er lancement : demander la phrase une fois la boucle démarrée
 
         UpdateTray();
     }
@@ -67,7 +66,59 @@ public sealed class TrayApp : ApplicationContext
         try { return StartupManager.IsEnabled(); } catch { return false; }
     }
 
-    // Marshalle une action vers le thread UI.
+    // (Re)crée le client réseau avec la config courante.
+    private void StartClient()
+    {
+        _client?.Dispose();
+        _connected = false;
+        _devices = new();
+        _client = new RelayClient(_cfg);
+        _client.ConnectionChanged += c => Post(() => { _connected = c; UpdateTray(); _mainForm?.SetConnected(c); });
+        _client.DevicesUpdated += d => Post(() => { ParseDevices(d); UpdateTray(); PushDevices(); });
+        _client.ClipReceived += clip => Post(() => OnRemoteClip(clip));
+        _client.Log += msg => Console.WriteLine("[ClipSync] " + msg);
+        _client.Start();
+    }
+
+    private void ShowSettings()
+    {
+        if (_settingsOpen) return;
+        _settingsOpen = true;
+        try
+        {
+            using var form = new SetupForm(_cfg.Phrase, _cfg.DeviceName);
+            if (form.ShowDialog() == DialogResult.OK)
+            {
+                _cfg.Phrase = form.Phrase;
+                _cfg.DeviceName = form.DeviceNameValue;
+                _cfg.Save();
+                StartClient(); // reconnexion avec la nouvelle phrase
+                UpdateTray();
+                _mainForm?.SetConnected(false);
+            }
+        }
+        finally { _settingsOpen = false; }
+    }
+
+    private void ShowMain()
+    {
+        if (_mainForm is null || _mainForm.IsDisposed)
+        {
+            _mainForm = new MainForm(_cfg.DeviceName);
+            _mainForm.SettingsRequested += ShowSettings;
+        }
+        _mainForm.SetConnected(_connected);
+        PushDevices();
+        _mainForm.Show();
+        _mainForm.WindowState = FormWindowState.Normal;
+        _mainForm.Activate();
+    }
+
+    private void PushDevices()
+    {
+        _mainForm?.SetDevices(_devices.Select(x => (x.Name, x.Platform, x.Online)));
+    }
+
     private void Post(Action action)
     {
         try { if (_marshal.IsHandleCreated) _marshal.BeginInvoke(action); }
@@ -89,15 +140,17 @@ public sealed class TrayApp : ApplicationContext
 
     private void UpdateTray()
     {
+        if (!_cfg.IsConfigured) { _tray.Text = "ClipSync — à configurer"; return; }
         var online = _devices.Count(d => d.Online);
         _tray.Text = _connected
-            ? $"ClipSync — connecté · {online} appareil(s) en ligne"
+            ? $"ClipSync — connecté · {online} en ligne"
             : "ClipSync — hors ligne";
     }
 
     // ---- Envoi : presse-papiers Windows modifié -----------------------------
     private void OnLocalClipboardChanged()
     {
+        if (_client is null) return;
         if (DateTime.UtcNow < _suppressUntil) return; // écho de notre propre écriture
         try
         {
@@ -124,6 +177,7 @@ public sealed class TrayApp : ApplicationContext
     // ---- Réception : clip reçu du relais ------------------------------------
     private void OnRemoteClip(JsonElement clip)
     {
+        if (_client is null) return;
         try
         {
             var type = clip.GetProperty("contentType").GetString();
@@ -168,28 +222,12 @@ public sealed class TrayApp : ApplicationContext
         catch { }
     }
 
-    private void ShowStatus()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"Serveur : {_cfg.ServerUrl}");
-        sb.AppendLine($"Cet appareil : {_cfg.DeviceName}");
-        sb.AppendLine($"État : {(_connected ? "connecté" : "hors ligne")}");
-        sb.AppendLine();
-        sb.AppendLine("Appareils associés :");
-        if (_devices.Count == 0)
-            sb.AppendLine("   (aucun autre appareil)");
-        else
-            foreach (var d in _devices)
-                sb.AppendLine($"   {(d.Online ? "●" : "○")} {d.Name} ({d.Platform}) — {(d.Online ? "en ligne" : "hors ligne")}");
-
-        MessageBox.Show(sb.ToString(), "ClipSync", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-
     private void Quit()
     {
         _tray.Visible = false;
         _watcher.Dispose();
-        _client.Dispose();
+        _client?.Dispose();
+        _mainForm?.Dispose();
         ExitThread();
     }
 }

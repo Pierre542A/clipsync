@@ -1,4 +1,4 @@
-import { authToken, encKey, encryptText, decryptText, decryptBytes } from '/crypto.js';
+import { authToken, encKey, accountId, encryptText, decryptText, decryptBytes } from '/crypto.js';
 
 const $ = (s) => document.querySelector(s);
 const CFG = 'clipsync.cfg';
@@ -14,11 +14,11 @@ function loadCfg() {
 function saveCfg(c) { localStorage.setItem(CFG, JSON.stringify(c)); }
 
 let cfg = loadCfg();
-let ws = null, connected = false, key = null, token = null;
+let ws = null, connected = false, key = null, token = null, acct = null;
 
 const wsURL = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
 const httpBase = location.origin;
-const configured = () => !!(cfg.accountId && cfg.secret);
+const configured = () => !!cfg.phrase;
 
 function setStatus(text, online, sub = '') {
   $('#dot').className = 'dot ' + (online ? 'on' : 'off');
@@ -38,8 +38,9 @@ function toast(msg) {
 // --- Connexion WebSocket ---------------------------------------------------
 
 async function ensureKeys() {
-  token = await authToken(cfg.secret);
-  key = await encKey(cfg.secret);
+  token = await authToken(cfg.phrase);
+  key = await encKey(cfg.phrase);
+  acct = await accountId(cfg.phrase);
 }
 
 async function connect() {
@@ -49,7 +50,7 @@ async function connect() {
   ws = new WebSocket(wsURL);
   ws.onopen = () => {
     ws.send(JSON.stringify({
-      type: 'hello', accountId: cfg.accountId, token,
+      type: 'hello', accountId: acct, token,
       deviceId: cfg.deviceId, deviceName: cfg.deviceName, platform: 'ios',
     }));
     connected = true;
@@ -90,7 +91,7 @@ async function onClip(msg) {
 
 async function fetchFile(fileId) {
   const res = await fetch(httpBase + '/files/' + fileId, {
-    headers: { 'x-account-id': cfg.accountId, 'x-token': token },
+    headers: { 'x-account-id': acct, 'x-token': token },
   });
   if (!res.ok) return null;
   return new Uint8Array(await res.arrayBuffer());
@@ -148,7 +149,7 @@ function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&am
 
 $('#send').onclick = async () => {
   if (!configured()) { openSettings(); return; }
-  if (!connected) { toast('Connexion en cours…'); }
+  if (!token || !acct) await ensureKeys();
   let text;
   try { text = await navigator.clipboard.readText(); }
   catch { toast("Autorise l'accès au presse-papiers (Coller)"); return; }
@@ -159,14 +160,14 @@ $('#send').onclick = async () => {
   try {
     res = await fetch(httpBase + '/clip', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-account-id': cfg.accountId, 'x-token': token },
+      headers: { 'content-type': 'application/json', 'x-account-id': acct, 'x-token': token },
       body: JSON.stringify({
         contentType: 'text', text: ct, enc: 'v1', targets: 'all',
         deviceName: cfg.deviceName, deviceId: cfg.deviceId,
       }),
     });
   } catch { toast('Serveur injoignable'); return; }
-  if (res.status === 401) { toast('Secret incorrect'); return; }
+  if (res.status === 401) { toast('Phrase incorrecte'); return; }
   const j = await res.json().catch(() => ({}));
   toast(j.delivered > 0 ? `Envoyé à ${j.delivered} PC ✓` : 'Aucun PC en ligne');
 };
@@ -174,16 +175,14 @@ $('#send').onclick = async () => {
 // --- Réglages --------------------------------------------------------------
 
 function openSettings() {
-  $('#cfgAccount').value = cfg.accountId || '';
-  $('#cfgSecret').value = cfg.secret || '';
+  $('#cfgPhrase').value = cfg.phrase || '';
   $('#cfgName').value = cfg.deviceName || '';
   $('#settings').showModal();
 }
 $('#settingsBtn').onclick = openSettings;
 $('#cfgCancel').onclick = () => $('#settings').close();
 $('#cfgSave').onclick = async () => {
-  cfg.accountId = $('#cfgAccount').value.trim();
-  cfg.secret = $('#cfgSecret').value;
+  cfg.phrase = $('#cfgPhrase').value;
   cfg.deviceName = $('#cfgName').value.trim() || 'iPhone';
   saveCfg(cfg);
   $('#settings').close();

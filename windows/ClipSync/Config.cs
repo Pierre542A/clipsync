@@ -3,13 +3,12 @@ using System.Text.Json;
 namespace ClipSync;
 
 // Configuration locale, persistée dans %APPDATA%\ClipSync\config.json.
-// MVP : valeurs de démo par défaut pour se connecter au serveur local.
+// Une seule chose à renseigner : la « phrase de couplage » (identique sur tous les appareils).
 public sealed class Config
 {
     public string ServerUrl { get; set; } = "wss://clip.lateliercbd.com/ws";
     public string HttpUrl { get; set; } = "https://clip.lateliercbd.com";
-    public string AccountId { get; set; } = "";
-    public string Secret { get; set; } = "";
+    public string Phrase { get; set; } = ""; // relie les appareils + chiffre ; jamais envoyée telle quelle
     public string DeviceId { get; set; } = "";
     public string DeviceName { get; set; } = Environment.MachineName;
 
@@ -34,11 +33,10 @@ public sealed class Config
 
     Config EnsureDefaults()
     {
-        // MVP local : un compte de démo partagé, un deviceId stable par machine.
-        if (string.IsNullOrEmpty(AccountId)) AccountId = "demo-account";
-        if (string.IsNullOrEmpty(Secret)) Secret = "demo-secret";
         if (string.IsNullOrEmpty(DeviceId)) DeviceId = "pc-" + Guid.NewGuid().ToString("N")[..8];
         if (string.IsNullOrEmpty(DeviceName)) DeviceName = Environment.MachineName;
+        if (string.IsNullOrEmpty(ServerUrl)) ServerUrl = "wss://clip.lateliercbd.com/ws";
+        if (string.IsNullOrEmpty(HttpUrl)) HttpUrl = "https://clip.lateliercbd.com";
         Save();
         return this;
     }
@@ -52,4 +50,6 @@ public sealed class Config
         }
         catch { /* best effort */ }
     }
+
+    public bool IsConfigured => !string.IsNullOrWhiteSpace(Phrase);
 }

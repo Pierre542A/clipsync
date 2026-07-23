@@ -10,6 +10,7 @@ namespace ClipSync;
 public sealed class RelayClient : IDisposable
 {
     private readonly Config _cfg;
+    private readonly string _accountId;
     private readonly string _authToken;
     private readonly byte[] _encKey;
 
@@ -25,8 +26,9 @@ public sealed class RelayClient : IDisposable
     public RelayClient(Config cfg)
     {
         _cfg = cfg;
-        _authToken = Crypto.AuthToken(cfg.Secret);
-        _encKey = Crypto.EncKey(cfg.Secret);
+        _accountId = Crypto.AccountId(cfg.Phrase);
+        _authToken = Crypto.AuthToken(cfg.Phrase);
+        _encKey = Crypto.EncKey(cfg.Phrase);
     }
 
     public void Start()
@@ -59,7 +61,7 @@ public sealed class RelayClient : IDisposable
         await SendJson(new
         {
             type = "hello",
-            accountId = _cfg.AccountId,
+            accountId = _accountId,
             token = _authToken,
             deviceId = _cfg.DeviceId,
             deviceName = _cfg.DeviceName,
@@ -158,7 +160,7 @@ public sealed class RelayClient : IDisposable
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, _cfg.HttpUrl.TrimEnd('/') + "/files");
-            req.Headers.Add("x-account-id", _cfg.AccountId);
+            req.Headers.Add("x-account-id", _accountId);
             req.Headers.Add("x-token", _authToken);
             req.Headers.Add("x-file-type", "application/octet-stream");
             req.Content = new ByteArrayContent(data);
@@ -176,7 +178,7 @@ public sealed class RelayClient : IDisposable
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, _cfg.HttpUrl.TrimEnd('/') + "/files/" + fileId);
-            req.Headers.Add("x-account-id", _cfg.AccountId);
+            req.Headers.Add("x-account-id", _accountId);
             req.Headers.Add("x-token", _authToken);
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode) return null;

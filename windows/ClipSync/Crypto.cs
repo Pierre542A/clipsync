@@ -20,6 +20,14 @@ public static class Crypto
 
     public static byte[] EncKey(string secret) => Derive(secret, "clipsync-enc-v1");
 
+    // Identifiant de compte dérivé de la phrase (unique par phrase → aucune collision
+    // entre utilisateurs différents ; identique sur tous les appareils d'une même personne).
+    public static string AccountId(string phrase)
+    {
+        var h = SHA256.HashData(Encoding.UTF8.GetBytes("clipsync-acct-v1:" + phrase));
+        return "u-" + Convert.ToHexString(h)[..16].ToLowerInvariant();
+    }
+
     // Format du blob : nonce(12) || ciphertext || tag(16).
     public static byte[] Encrypt(byte[] key, byte[] plaintext)
     {
