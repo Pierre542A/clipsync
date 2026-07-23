@@ -68,7 +68,7 @@ app.post('/clip', async (req, reply) => {
   if (!accountId) return reply.code(401).send({ error: 'unauthorized' });
 
   const body = req.body ?? {};
-  const { contentType, text, fileId, fileType, targets, meta, deviceId, deviceName } = body;
+  const { contentType, text, fileId, fileType, enc, targets, meta, deviceId, deviceName } = body;
   if (!contentType) return reply.code(400).send({ error: 'missing contentType' });
 
   const senderId = deviceId ?? 'http-sender';
@@ -80,6 +80,7 @@ app.post('/clip', async (req, reply) => {
     text,
     fileId,
     fileType,
+    enc, // marqueur de chiffrement ('v1' | undefined)
     meta: meta ?? {},
     from: { deviceId: senderId, name: deviceName ?? 'iPhone' },
     ts: Date.now(),
@@ -164,9 +165,10 @@ function handle(socket, msg) {
         type: 'clip',
         messageId: msg.messageId,
         contentType: msg.contentType, // 'text' | 'image'
-        text: msg.text, // si texte
+        text: msg.text, // si texte (chiffré si enc)
         fileId: msg.fileId, // si image (à télécharger via GET /files/:id)
         fileType: msg.fileType,
+        enc: msg.enc, // marqueur de chiffrement ('v1' | undefined)
         meta: msg.meta ?? {},
         from: { deviceId: ref.deviceId, name: sender?.name ?? 'inconnu' },
         ts: Date.now(),
