@@ -30,9 +30,10 @@ avec statut de présence des appareils et confirmation « prêt à coller ».
 
 | Dossier    | Rôle                        | Stack                                   | État |
 |------------|-----------------------------|-----------------------------------------|------|
-| `server/`  | Relais présence + messages  | Node.js, Fastify, `@fastify/websocket`  | ✅ MVP |
-| `windows/` | Client PC (zone de notif)   | C#/.NET 8 (WinForms tray, WebSocket)    | ✅ MVP texte |
-| `ios/`     | App iPhone                  | Swift, SwiftUI, App Intents, APNs       | 🚧 (nécessite un Mac + Xcode) |
+| `server/`  | Relais + **sert la PWA**    | Node.js, Fastify, WebSocket, static     | ✅ **déployé** |
+| `server/public/` | **PWA iPhone (sans Mac)** | HTML/JS + Web Crypto (E2E)         | ✅ **live** — `https://clip.lateliercbd.com` |
+| `windows/` | Client PC (zone de notif)   | C#/.NET 8 (WinForms tray, WebSocket)    | ✅ texte + images |
+| `ios/`     | App iPhone **native**       | Swift, SwiftUI, App Intents             | ✅ code (compile sur Mac ; la PWA est l'alternative sans Mac) |
 
 ## Démarrer le serveur
 
