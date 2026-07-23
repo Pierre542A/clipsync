@@ -1,8 +1,9 @@
 import Foundation
 import UIKit
+import CryptoKit
 
 // Client réseau : WebSocket permanent (présence + réception en direct quand l'app
-// est ouverte) + HTTP pour l'upload/download des images.
+// est ouverte) + HTTP pour les images. Contenu chiffré de bout en bout.
 @MainActor
 final class RelayClient: ObservableObject {
     @Published var connected = false
@@ -15,11 +16,14 @@ final class RelayClient: ObservableObject {
     private var running = false
     private var heartbeat: Task<Void, Never>?
 
+    private var authToken: String { ClipCrypto.authToken(cfg.secret) }
+    private var encKey: SymmetricKey { ClipCrypto.encKey(cfg.secret) }
+
     init(cfg: Config) { self.cfg = cfg }
 
     func update(cfg: Config) {
         self.cfg = cfg
-        task?.cancel(with: .goingAway, reason: nil) // force une reconnexion propre
+        task?.cancel(with: .goingAway, reason: nil)
     }
 
     func start() {
@@ -35,7 +39,7 @@ final class RelayClient: ObservableObject {
         connected = false
     }
 
-    // MARK: - Boucle de connexion + reconnexion
+    // MARK: - Connexion + reconnexion
 
     private func connectLoop() async {
         while running {
@@ -44,11 +48,8 @@ final class RelayClient: ObservableObject {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 continue
             }
-            do {
-                try await connectOnce(url: url)
-            } catch {
-                lastEvent = "Hors ligne"
-            }
+            do { try await connectOnce(url: url) }
+            catch { lastEvent = "Hors ligne" }
             connected = false
             heartbeat?.cancel()
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -63,7 +64,7 @@ final class RelayClient: ObservableObject {
         try await sendJSON([
             "type": "hello",
             "accountId": cfg.accountId,
-            "token": cfg.secret,
+            "token": authToken,
             "deviceId": cfg.deviceId,
             "deviceName": cfg.deviceName,
             "platform": "ios",
@@ -93,7 +94,7 @@ final class RelayClient: ObservableObject {
         }
     }
 
-    // MARK: - Réception
+    // MARK: - Réception (déchiffrement)
 
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
@@ -128,13 +129,15 @@ final class RelayClient: ObservableObject {
         let fromId = from?["deviceId"] as? String
         let messageId = obj["messageId"] as? String
 
-        if ct == "text", let text = obj["text"] as? String {
+        if ct == "text", let enc = obj["text"] as? String, let text = ClipCrypto.decryptText(enc, key: encKey) {
             UIPasteboard.general.string = text
             lastEvent = "Reçu de \(fromName) — dans le presse-papiers"
             ackApplied(messageId: messageId, to: fromId)
         } else if ct == "image", let fileId = obj["fileId"] as? String {
             Task {
-                if let data = await downloadFile(fileId), let img = UIImage(data: data) {
+                if let blob = await downloadFile(fileId),
+                   let data = ClipCrypto.decrypt(blob, key: encKey),
+                   let img = UIImage(data: data) {
                     UIPasteboard.general.image = img
                     lastEvent = "Image reçue de \(fromName) — dans le presse-papiers"
                     ackApplied(messageId: messageId, to: fromId)
@@ -148,7 +151,7 @@ final class RelayClient: ObservableObject {
         Task { try? await sendJSON(["type": "applied", "messageId": messageId, "to": to, "success": true], over: t) }
     }
 
-    // MARK: - Envoi
+    // MARK: - Envoi (chiffrement)
 
     func sendPasteboard() async {
         let pb = UIPasteboard.general
@@ -163,9 +166,10 @@ final class RelayClient: ObservableObject {
 
     func sendText(_ text: String) async {
         guard let t = task else { lastEvent = "Non connecté"; return }
+        guard let ct = ClipCrypto.encryptText(text, key: encKey) else { lastEvent = "Chiffrement échoué"; return }
         try? await sendJSON([
             "type": "clip", "messageId": UUID().uuidString,
-            "contentType": "text", "text": text, "targets": "all",
+            "contentType": "text", "text": ct, "enc": "v1", "targets": "all",
         ], over: t)
         lastEvent = "Texte envoyé…"
     }
@@ -173,24 +177,25 @@ final class RelayClient: ObservableObject {
     func sendImage(_ png: Data) async {
         guard let t = task else { lastEvent = "Non connecté"; return }
         lastEvent = "Envoi de l'image…"
-        guard let fileId = await uploadImage(png) else { lastEvent = "Échec upload image"; return }
+        guard let blob = ClipCrypto.encrypt(png, key: encKey) else { lastEvent = "Chiffrement échoué"; return }
+        guard let fileId = await uploadBlob(blob) else { lastEvent = "Échec upload image"; return }
         try? await sendJSON([
             "type": "clip", "messageId": UUID().uuidString,
-            "contentType": "image", "fileId": fileId, "fileType": "image/png", "targets": "all",
+            "contentType": "image", "fileId": fileId, "fileType": "image/png", "enc": "v1", "targets": "all",
         ], over: t)
         lastEvent = "Image envoyée…"
     }
 
-    // MARK: - HTTP images
+    // MARK: - HTTP (contenu déjà chiffré)
 
-    private func uploadImage(_ data: Data) async -> String? {
+    private func uploadBlob(_ data: Data) async -> String? {
         guard let url = URL(string: cfg.httpURL + "/files") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         req.setValue(cfg.accountId, forHTTPHeaderField: "x-account-id")
-        req.setValue(cfg.secret, forHTTPHeaderField: "x-token")
-        req.setValue("image/png", forHTTPHeaderField: "x-file-type")
+        req.setValue(authToken, forHTTPHeaderField: "x-token")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "x-file-type")
         req.httpBody = data
         guard let (respData, resp) = try? await session.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200,
@@ -202,7 +207,7 @@ final class RelayClient: ObservableObject {
         guard let url = URL(string: cfg.httpURL + "/files/" + fileId) else { return nil }
         var req = URLRequest(url: url)
         req.setValue(cfg.accountId, forHTTPHeaderField: "x-account-id")
-        req.setValue(cfg.secret, forHTTPHeaderField: "x-token")
+        req.setValue(authToken, forHTTPHeaderField: "x-token")
         guard let (data, resp) = try? await session.data(for: req),
               (resp as? HTTPURLResponse)?.statusCode == 200 else { return nil }
         return data

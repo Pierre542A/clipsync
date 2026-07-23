@@ -115,13 +115,7 @@ public sealed class TrayApp : ApplicationContext
                 using var ms = new MemoryStream();
                 img.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
                 var png = ms.ToArray();
-                int w = img.Width, h = img.Height;
-                _ = Task.Run(async () =>
-                {
-                    var fileId = await _client.UploadImageAsync(png, "image/png");
-                    if (!string.IsNullOrEmpty(fileId))
-                        await _client.SendClipImage(fileId, "image/png", w, h);
-                });
+                _ = _client.SendImage(png, img.Width, img.Height); // chiffré dans RelayClient
             }
         }
         catch { /* presse-papiers verrouillé par une autre app : on ignore */ }
@@ -138,7 +132,7 @@ public sealed class TrayApp : ApplicationContext
 
             if (type == "text" && clip.TryGetProperty("text", out var t))
             {
-                var text = t.GetString() ?? "";
+                var text = _client.DecryptText(t.GetString() ?? "");
                 if (string.IsNullOrEmpty(text)) return;
                 _suppressUntil = DateTime.UtcNow.AddMilliseconds(800);
                 Clipboard.SetText(text);
@@ -151,9 +145,9 @@ public sealed class TrayApp : ApplicationContext
                 if (string.IsNullOrEmpty(fileId)) return;
                 _ = Task.Run(async () =>
                 {
-                    var bytes = await _client.DownloadFileAsync(fileId);
-                    if (bytes is null) return;
-                    Post(() => ApplyImage(bytes, from));
+                    var png = await _client.DownloadImage(fileId); // téléchargé + déchiffré
+                    if (png is null) return;
+                    Post(() => ApplyImage(png, from));
                 });
             }
         }

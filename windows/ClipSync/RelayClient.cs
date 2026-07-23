@@ -4,11 +4,15 @@ using System.Text.Json;
 
 namespace ClipSync;
 
-// Client WebSocket vers le serveur relais : connexion permanente + reconnexion auto,
-// hello/heartbeat, envoi de clips, réception (devices / clip / error).
+// Client WebSocket vers le serveur relais + HTTP images.
+// Chiffrement de bout en bout : le contenu est chiffré/déchiffré ici, le serveur
+// ne reçoit que du chiffré et le jeton d'auth dérivé (jamais la clé de chiffrement).
 public sealed class RelayClient : IDisposable
 {
     private readonly Config _cfg;
+    private readonly string _authToken;
+    private readonly byte[] _encKey;
+
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _cts;
     private readonly HttpClient _http = new();
@@ -16,9 +20,14 @@ public sealed class RelayClient : IDisposable
     public event Action<string>? Log;
     public event Action<bool>? ConnectionChanged;      // true = connecté
     public event Action<JsonElement>? DevicesUpdated;  // tableau d'appareils
-    public event Action<JsonElement>? ClipReceived;    // message clip complet
+    public event Action<JsonElement>? ClipReceived;    // message clip complet (chiffré)
 
-    public RelayClient(Config cfg) => _cfg = cfg;
+    public RelayClient(Config cfg)
+    {
+        _cfg = cfg;
+        _authToken = Crypto.AuthToken(cfg.Secret);
+        _encKey = Crypto.EncKey(cfg.Secret);
+    }
 
     public void Start()
     {
@@ -30,15 +39,9 @@ public sealed class RelayClient : IDisposable
     {
         while (!ct.IsCancellationRequested)
         {
-            try
-            {
-                await RunOnce(ct);
-            }
+            try { await RunOnce(ct); }
             catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                Log?.Invoke("WS erreur : " + ex.Message);
-            }
+            catch (Exception ex) { Log?.Invoke("WS erreur : " + ex.Message); }
 
             ConnectionChanged?.Invoke(false);
             try { await Task.Delay(3000, ct); } catch { }
@@ -57,7 +60,7 @@ public sealed class RelayClient : IDisposable
         {
             type = "hello",
             accountId = _cfg.AccountId,
-            token = _cfg.Secret,
+            token = _authToken,
             deviceId = _cfg.DeviceId,
             deviceName = _cfg.DeviceName,
             platform = "windows",
@@ -87,10 +90,8 @@ public sealed class RelayClient : IDisposable
     {
         while (ws.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
-            try { await SendJson(new { type = "heartbeat" }, ct); }
-            catch { return; }
-            try { await Task.Delay(30_000, ct); }
-            catch { return; }
+            try { await SendJson(new { type = "heartbeat" }, ct); } catch { return; }
+            try { await Task.Delay(30_000, ct); } catch { return; }
         }
     }
 
@@ -100,8 +101,7 @@ public sealed class RelayClient : IDisposable
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            var type = root.GetProperty("type").GetString();
-            switch (type)
+            switch (root.GetProperty("type").GetString())
             {
                 case "welcome":
                 case "devices":
@@ -116,43 +116,51 @@ public sealed class RelayClient : IDisposable
                     break;
             }
         }
-        catch (Exception ex)
-        {
-            Log?.Invoke("parse : " + ex.Message);
-        }
+        catch (Exception ex) { Log?.Invoke("parse : " + ex.Message); }
     }
+
+    // ---- Envoi (chiffré) ----------------------------------------------------
 
     public Task SendClipText(string text, CancellationToken ct = default) =>
         SendJson(new
         {
-            type = "clip",
-            messageId = Guid.NewGuid().ToString(),
-            contentType = "text",
-            text,
-            targets = "all",
+            type = "clip", messageId = Guid.NewGuid().ToString(),
+            contentType = "text", text = Crypto.EncryptText(_encKey, text), enc = "v1", targets = "all",
         }, ct);
 
-    public Task SendClipImage(string fileId, string fileType, int width, int height, CancellationToken ct = default) =>
-        SendJson(new
+    public async Task SendImage(byte[] png, int width, int height, CancellationToken ct = default)
+    {
+        var blob = Crypto.Encrypt(_encKey, png); // on chiffre AVANT l'upload
+        var fileId = await UploadAsync(blob);
+        if (fileId is null) { Log?.Invoke("upload image échoué"); return; }
+        await SendJson(new
         {
-            type = "clip",
-            messageId = Guid.NewGuid().ToString(),
-            contentType = "image",
-            fileId,
-            fileType,
-            meta = new { width, height },
-            targets = "all",
+            type = "clip", messageId = Guid.NewGuid().ToString(),
+            contentType = "image", fileId, fileType = "image/png", enc = "v1",
+            meta = new { width, height }, targets = "all",
         }, ct);
+    }
 
-    // Upload d'une image vers le stockage temporaire du serveur → renvoie le fileId.
-    public async Task<string?> UploadImageAsync(byte[] data, string contentType)
+    // ---- Réception (déchiffrement) ------------------------------------------
+
+    public string? DecryptText(string base64) => Crypto.DecryptText(_encKey, base64);
+
+    public async Task<byte[]?> DownloadImage(string fileId)
+    {
+        var blob = await DownloadAsync(fileId);
+        return blob is null ? null : Crypto.Decrypt(_encKey, blob);
+    }
+
+    // ---- HTTP brut (contenu déjà chiffré) -----------------------------------
+
+    private async Task<string?> UploadAsync(byte[] data)
     {
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, _cfg.HttpUrl.TrimEnd('/') + "/files");
             req.Headers.Add("x-account-id", _cfg.AccountId);
-            req.Headers.Add("x-token", _cfg.Secret);
-            req.Headers.Add("x-file-type", contentType);
+            req.Headers.Add("x-token", _authToken);
+            req.Headers.Add("x-file-type", "application/octet-stream");
             req.Content = new ByteArrayContent(data);
             req.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             using var res = await _http.SendAsync(req);
@@ -163,14 +171,13 @@ public sealed class RelayClient : IDisposable
         catch (Exception ex) { Log?.Invoke("upload : " + ex.Message); return null; }
     }
 
-    // Téléchargement d'une image depuis le serveur.
-    public async Task<byte[]?> DownloadFileAsync(string fileId)
+    private async Task<byte[]?> DownloadAsync(string fileId)
     {
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, _cfg.HttpUrl.TrimEnd('/') + "/files/" + fileId);
             req.Headers.Add("x-account-id", _cfg.AccountId);
-            req.Headers.Add("x-token", _cfg.Secret);
+            req.Headers.Add("x-token", _authToken);
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode) return null;
             return await res.Content.ReadAsByteArrayAsync();

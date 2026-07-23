@@ -124,15 +124,28 @@ En-têtes d'authentification requis sur les deux routes :
 
 ---
 
-## 5. Sécurité — feuille de route (post-MVP)
+## 5. Chiffrement de bout en bout (implémenté — v1)
 
-- **Chiffrement de bout en bout** : `text` et octets d'image chiffrés côté client.
-  Le contenu est chiffré une fois avec une clé de contenu aléatoire, elle-même
-  chiffrée **pour chaque appareil cible** → permet « envoyer à tous » sans ré-upload,
-  sans que le serveur puisse lire.
-- **Appairage par QR code** : transfère `accountId` + secret + clé publique de l'appareil.
-- **Révocation** : invalider la clé d'un appareil ; l'ancien jeton devient inutilisable.
-- **Transport** : WSS + HTTPS (TLS terminé par Nginx sur le VPS).
+Le serveur ne voit jamais le contenu en clair : il relaie des payloads **opaques**.
+
+**Dérivation de clés** (depuis le secret d'appairage, **jamais transmis**) :
+- `authToken = hex(HKDF-SHA256(secret, salt="clipsync-v1", info="clipsync-auth-v1", 32))`
+  → valeur envoyée dans `token` (hello) et `x-token` (HTTP). **C'est tout ce que le serveur connaît.**
+- `encKey = HKDF-SHA256(secret, salt="clipsync-v1", info="clipsync-enc-v1", 32)`
+  → **jamais transmise** ; sert au chiffrement AES-256-GCM.
+
+**Chiffrement** : AES-256-GCM, nonce 12 octets aléatoire, tag 16 octets.
+Blob = `nonce(12) ‖ ciphertext ‖ tag(16)` (identique au `combined` de CryptoKit / à l'assemblage .NET).
+- **Texte** : le champ `text` = base64(blob), et le clip porte `enc: "v1"`.
+- **Image** : les octets envoyés à `POST /files` sont **déjà le blob chiffré** ; le clip porte `enc: "v1"`.
+
+Le serveur authentifie via `authToken` mais **ne peut pas dériver `encKey`** (il n'a jamais le secret) :
+même compromis serveur, le presse-papiers reste illisible. Interop .NET ↔ CryptoKit vérifiée par test.
+
+### Feuille de route
+- **Appairage par QR code** : transférer `accountId` + secret entre appareils sans le taper.
+- **Révocation** d'appareil / secret par appareil.
+- **Transport** : déjà en WSS + HTTPS (TLS terminé par Nginx).
 
 ---
 
