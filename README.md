@@ -17,7 +17,7 @@ avec statut de présence des appareils et confirmation « prêt à coller ».
    ┌────────────────┼─────────────────┐
    │                │                 │
  iPhone         PC portable        PC fixe
- (Swift)        (Electron)         (Electron)
+ (Swift)        (C#/.NET)          (C#/.NET)
 ```
 
 - **Une fois appairés, les appareils n'ont plus besoin d'être sur le même réseau** :
@@ -31,7 +31,7 @@ avec statut de présence des appareils et confirmation « prêt à coller ».
 | Dossier    | Rôle                        | Stack                                   | État |
 |------------|-----------------------------|-----------------------------------------|------|
 | `server/`  | Relais présence + messages  | Node.js, Fastify, `@fastify/websocket`  | ✅ MVP |
-| `windows/` | Client PC (zone de notif)   | Electron (tray, clipboard, notifs)      | 🚧 |
+| `windows/` | Client PC (zone de notif)   | C#/.NET 8 (WinForms tray, WebSocket)    | ✅ MVP texte |
 | `ios/`     | App iPhone                  | Swift, SwiftUI, App Intents, APNs       | 🚧 (nécessite un Mac + Xcode) |
 
 ## Démarrer le serveur
