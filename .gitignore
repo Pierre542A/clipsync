@@ -8,6 +8,11 @@ build/
 windows/out/
 windows/dist/
 
+# .NET (client Windows)
+bin/
+obj/
+*.user
+
 # Logs
 *.log
 npm-debug.log*
