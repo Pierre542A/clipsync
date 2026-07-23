@@ -7,8 +7,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Code
+# Code + PWA
 COPY src ./src
+COPY public ./public
 
 ENV NODE_ENV=production
 ENV PORT=8787
