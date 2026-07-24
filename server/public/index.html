@@ -26,9 +26,11 @@
   </div>
 
   <button class="primary" id="send">Envoyer le presse-papiers</button>
+  <button class="secondary" id="sendImage">Envoyer une image</button>
+  <input type="file" id="imgInput" accept="image/*" hidden>
   <div id="pasteFallback" hidden>
-    <textarea id="pasteBox" rows="3" placeholder="Appui long ici → Coller, puis « Envoyer ce texte »"></textarea>
-    <button class="primary" id="pasteSend">Envoyer ce texte</button>
+    <div id="pasteBox" contenteditable="true" data-ph="Appui long ici → Coller (ton texte OU ton image)"></div>
+    <button class="primary" id="pasteSend">Envoyer</button>
   </div>
   <p class="hint">Copie un texte, touche « Envoyer ».<br>Si iOS bloque, un champ apparaît : colle-y ton texte.</p>
 

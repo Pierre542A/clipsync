@@ -45,6 +45,13 @@ button.primary {
 }
 button.primary:active { transform: scale(0.98); }
 button.primary:disabled { opacity: 0.5; }
+
+button.secondary {
+  width: 100%; border: 1px solid var(--card2); border-radius: 16px;
+  background: var(--card); color: var(--text); font-size: 16px; font-weight: 600; padding: 16px;
+  margin-bottom: 8px;
+}
+button.secondary:active { transform: scale(0.98); }
 .hint { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 18px; }
 
 h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 4px 8px; }
@@ -63,10 +70,12 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
 
 #pasteFallback { margin-bottom: 8px; }
 #pasteBox {
-  width: 100%; background: var(--card); border: 1px solid var(--card2); color: var(--text);
-  border-radius: 12px; padding: 14px; font-size: 16px; margin-bottom: 8px; resize: vertical;
-  font-family: inherit;
+  width: 100%; min-height: 64px; background: var(--card); border: 1px solid var(--card2); color: var(--text);
+  border-radius: 12px; padding: 14px; font-size: 16px; margin-bottom: 8px;
+  font-family: inherit; word-break: break-word;
 }
+#pasteBox:empty:before { content: attr(data-ph); color: var(--muted); }
+#pasteBox img { max-width: 100%; border-radius: 8px; }
 
 
 .device { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
