@@ -125,6 +125,11 @@ function addReceived(from, type, payload) {
     const img = document.createElement('img');
     img.src = url;
     div.appendChild(img);
+    const hint = document.createElement('div');
+    hint.className = 'meta';
+    hint.style.marginTop = '8px';
+    hint.textContent = 'Appui long sur l\'image → « Ajouter aux photos » / « Copier »';
+    div.appendChild(hint);
   }
   $('#received').prepend(div);
   toast('Nouveau contenu reçu');
@@ -210,61 +215,30 @@ async function doSend(text) {
 
 $('#send').onclick = async () => {
   if (!configured()) { openSettings(); return; }
-  // 1) Essai lecture complète (texte OU image) — quand iOS l'autorise.
+  // Lecture directe du presse-papiers (texte OU image). iOS affiche « Coller » : touche-le.
   try {
     const items = await navigator.clipboard.read();
     for (const item of items) {
       const imgType = item.types.find((t) => t.startsWith('image/'));
-      if (imgType) { $('#pasteFallback').hidden = true; await doSendImage(await item.getType(imgType)); return; }
+      if (imgType) { await doSendImage(await item.getType(imgType)); return; }
     }
     for (const item of items) {
       if (item.types.includes('text/plain')) {
         const txt = await (await item.getType('text/plain')).text();
-        if (txt) { $('#pasteFallback').hidden = true; await doSend(txt); return; }
+        if (txt) { await doSend(txt); return; }
       }
     }
-  } catch { /* iOS bloque souvent clipboard.read() */ }
+    toast('Presse-papiers vide');
+    return;
+  } catch { /* read() indisponible -> readText */ }
 
-  // 2) Essai texte simple.
-  let text = null;
-  try { text = await navigator.clipboard.readText(); } catch {}
-  if (text) { $('#pasteFallback').hidden = true; await doSend(text); return; }
-
-  // 3) Rien d'automatique -> champ manuel (texte). Pour une image : bouton dédié.
-  $('#pasteFallback').hidden = false;
-  $('#pasteBox').innerHTML = '';
-  $('#pasteBox').focus();
-  toast('Appui long dans le champ → Coller (texte ou image)');
-};
-
-// Coller dans le champ : image -> envoi direct ; texte -> reste pour « Envoyer ».
-$('#pasteBox').addEventListener('paste', async (e) => {
-  const items = e.clipboardData ? [...(e.clipboardData.items || [])] : [];
-  const imgItem = items.find((it) => it.type && it.type.startsWith('image/'));
-  if (imgItem) {
-    e.preventDefault();
-    const blob = imgItem.getAsFile();
-    $('#pasteBox').innerHTML = '';
-    $('#pasteFallback').hidden = true;
-    if (blob) await doSendImage(blob);
+  try {
+    const txt = await navigator.clipboard.readText();
+    if (txt) { await doSend(txt); return; }
+    toast('Presse-papiers vide');
+  } catch {
+    toast('Réessaie (touche « Coller »), ou utilise « Envoyer des fichiers »');
   }
-  // sinon : le texte se colle normalement dans le champ
-});
-
-$('#pasteSend').onclick = async () => {
-  const text = $('#pasteBox').innerText.trim();
-  if (!text) { toast('Le champ est vide'); return; }
-  await doSend(text);
-  $('#pasteBox').innerHTML = '';
-  $('#pasteFallback').hidden = true;
-};
-
-// Envoi d'image fiable : sélecteur de photo (Photos / Fichiers).
-$('#sendImage').onclick = () => { if (!configured()) { openSettings(); return; } $('#imgInput').click(); };
-$('#imgInput').onchange = async (e) => {
-  const file = e.target.files && e.target.files[0];
-  if (file) await doSendImage(file);
-  e.target.value = '';
 };
 
 // --- Envoi de fichiers (n'importe quel type, plusieurs, avec progression) --

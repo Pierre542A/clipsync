@@ -243,7 +243,7 @@ public sealed class TrayApp : ApplicationContext
         try
         {
             var dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "ClipSync");
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "ClipSync");
             Directory.CreateDirectory(dir);
             var safe = string.Concat(filename.Split(Path.GetInvalidFileNameChars()));
             if (string.IsNullOrWhiteSpace(safe)) safe = "fichier";
