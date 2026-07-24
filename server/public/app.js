@@ -15,6 +15,7 @@ function saveCfg(c) { localStorage.setItem(CFG, JSON.stringify(c)); }
 
 let cfg = loadCfg();
 let ws = null, connected = false, key = null, token = null, acct = null;
+let deviceList = [];
 
 const wsURL = (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + '/ws';
 const httpBase = location.origin;
@@ -66,7 +67,7 @@ setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type
 async function handle(msg) {
   switch (msg.type) {
     case 'welcome':
-    case 'devices': renderDevices(msg.devices || []); break;
+    case 'devices': deviceList = msg.devices || []; renderDevices(deviceList); break;
     case 'clip': await onClip(msg); break;
     case 'sent': break;
     case 'applied': toast(`Collé sur ${msg.by?.name || 'PC'} ✓`); break;
@@ -251,7 +252,7 @@ function showProgress(name, frac) {
 }
 function hideProgress() { $('#progress').hidden = true; $('#progressBar').style.width = '0%'; }
 
-async function doSendFile(file) {
+async function doSendFile(file, target = 'all') {
   if (!token || !acct) await ensureKeys();
   if (file.size > MAX_FILE) { toast(`Trop lourd : ${file.name} (max 100 Mo)`); return; }
   const raw = new Uint8Array(await file.arrayBuffer());
@@ -266,7 +267,7 @@ async function doSendFile(file) {
       headers: { 'content-type': 'application/json', 'x-account-id': acct, 'x-token': token },
       body: JSON.stringify({
         contentType: 'file', fileId, fileType: file.type || 'application/octet-stream', enc: 'v1',
-        meta: { filename: file.name, size: file.size }, targets: 'all',
+        meta: { filename: file.name, size: file.size }, targets: target === 'all' ? 'all' : [target],
         deviceName: cfg.deviceName, deviceId: cfg.deviceId,
       }),
     });
@@ -278,9 +279,34 @@ async function doSendFile(file) {
 $('#sendFiles').onclick = () => { if (!configured()) { openSettings(); return; } $('#fileInput').click(); };
 $('#fileInput').onchange = async (e) => {
   const files = [...(e.target.files || [])];
-  for (const f of files) await doSendFile(f);
   e.target.value = '';
+  if (!files.length) return;
+  const online = deviceList.filter((d) => d.online);
+  if (online.length <= 1) {
+    for (const f of files) await doSendFile(f, 'all'); // 0 ou 1 cible -> direct
+  } else {
+    openTargetPicker(files); // plusieurs PC -> on choisit
+  }
 };
+
+function openTargetPicker(files) {
+  const online = deviceList.filter((d) => d.online);
+  const list = $('#targetList');
+  list.innerHTML = '';
+  const addOpt = (label, sub, value) => {
+    const b = document.createElement('button');
+    b.className = 'target-opt';
+    b.innerHTML = `<span class="t-name">${escapeHtml(label)}</span><span class="t-sub">${escapeHtml(sub)}</span>`;
+    b.onclick = async () => { $('#targetPicker').close(); for (const f of files) await doSendFile(f, value); };
+    list.appendChild(b);
+  };
+  const plural = files.length > 1 ? `${files.length} fichiers` : files[0].name;
+  $('#targetTitle').textContent = `Envoyer ${plural} à`;
+  addOpt('Tous les appareils', `${online.length} en ligne`, 'all');
+  for (const d of online) addOpt(d.name, d.platform, d.deviceId);
+  $('#targetPicker').showModal();
+}
+$('#targetCancel').onclick = () => $('#targetPicker').close();
 
 // --- Réglages --------------------------------------------------------------
 
