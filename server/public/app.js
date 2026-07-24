@@ -147,14 +147,9 @@ function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&am
 
 // --- Envoi (chiffrement) ---------------------------------------------------
 
-$('#send').onclick = async () => {
-  if (!configured()) { openSettings(); return; }
+async function doSend(text) {
+  if (!text) { toast('Rien à envoyer'); return; }
   if (!token || !acct) await ensureKeys();
-  let text;
-  try { text = await navigator.clipboard.readText(); }
-  catch { toast("Autorise l'accès au presse-papiers (Coller)"); return; }
-  if (!text) { toast('Presse-papiers vide'); return; }
-
   const ct = await encryptText(key, text);
   let res;
   try {
@@ -169,7 +164,32 @@ $('#send').onclick = async () => {
   } catch { toast('Serveur injoignable'); return; }
   if (res.status === 401) { toast('Phrase incorrecte'); return; }
   const j = await res.json().catch(() => ({}));
-  toast(j.delivered > 0 ? `Envoyé à ${j.delivered} PC ✓` : 'Aucun PC en ligne');
+  toast(j.delivered > 0 ? `Envoyé à ${j.delivered} PC ✓` : 'Aucun PC en ligne (ouvre ClipSync sur le PC)');
+}
+
+$('#send').onclick = async () => {
+  if (!configured()) { openSettings(); return; }
+  // Lire le presse-papiers EN PREMIER (préserve le geste utilisateur iOS).
+  let text = null;
+  try { text = await navigator.clipboard.readText(); } catch { /* iOS bloque souvent */ }
+  if (text) {
+    $('#pasteFallback').hidden = true;
+    await doSend(text);
+  } else {
+    // Lecture auto refusée par iOS -> champ de collage manuel (marche à tous les coups).
+    $('#pasteFallback').hidden = false;
+    $('#pasteBox').value = '';
+    $('#pasteBox').focus();
+    toast('Colle ton texte dans le champ, puis « Envoyer ce texte »');
+  }
+};
+
+$('#pasteSend').onclick = async () => {
+  const text = $('#pasteBox').value;
+  if (!text) { toast('Le champ est vide'); return; }
+  await doSend(text);
+  $('#pasteBox').value = '';
+  $('#pasteFallback').hidden = true;
 };
 
 // --- Réglages --------------------------------------------------------------
