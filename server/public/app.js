@@ -147,19 +147,20 @@ function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&am
 
 // --- Envoi (chiffrement) ---------------------------------------------------
 
-// Upload des octets (déjà chiffrés) vers le stockage temporaire -> renvoie fileId.
-async function uploadBlob(bytes) {
-  const res = await fetch(httpBase + '/files', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/octet-stream',
-      'x-account-id': acct, 'x-token': token, 'x-file-type': 'application/octet-stream',
-    },
-    body: bytes,
+// Upload des octets (déjà chiffrés) via XHR pour avoir la progression -> renvoie fileId.
+function uploadBlob(bytes, onProgress) {
+  return new Promise((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', httpBase + '/files');
+    xhr.setRequestHeader('content-type', 'application/octet-stream');
+    xhr.setRequestHeader('x-account-id', acct);
+    xhr.setRequestHeader('x-token', token);
+    xhr.setRequestHeader('x-file-type', 'application/octet-stream');
+    if (onProgress) xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => { try { resolve((JSON.parse(xhr.responseText) || {}).fileId || null); } catch { resolve(null); } };
+    xhr.onerror = () => resolve(null);
+    xhr.send(bytes);
   });
-  if (!res.ok) return null;
-  const j = await res.json().catch(() => ({}));
-  return j.fileId || null;
 }
 
 // Envoi d'une image (Blob/File) : chiffrement -> upload -> clip image.
@@ -263,6 +264,47 @@ $('#sendImage').onclick = () => { if (!configured()) { openSettings(); return; }
 $('#imgInput').onchange = async (e) => {
   const file = e.target.files && e.target.files[0];
   if (file) await doSendImage(file);
+  e.target.value = '';
+};
+
+// --- Envoi de fichiers (n'importe quel type, plusieurs, avec progression) --
+const MAX_FILE = 100 * 1024 * 1024;
+
+function showProgress(name, frac) {
+  $('#progress').hidden = false;
+  $('#progressLabel').textContent = name;
+  $('#progressBar').style.width = Math.round(frac * 100) + '%';
+}
+function hideProgress() { $('#progress').hidden = true; $('#progressBar').style.width = '0%'; }
+
+async function doSendFile(file) {
+  if (!token || !acct) await ensureKeys();
+  if (file.size > MAX_FILE) { toast(`Trop lourd : ${file.name} (max 100 Mo)`); return; }
+  const raw = new Uint8Array(await file.arrayBuffer());
+  const enc = await encryptBytes(key, raw);
+  showProgress(file.name, 0);
+  const fileId = await uploadBlob(enc, (p) => showProgress(file.name, p));
+  hideProgress();
+  if (!fileId) { toast('Échec : ' + file.name); return; }
+  try {
+    const res = await fetch(httpBase + '/clip', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-account-id': acct, 'x-token': token },
+      body: JSON.stringify({
+        contentType: 'file', fileId, fileType: file.type || 'application/octet-stream', enc: 'v1',
+        meta: { filename: file.name, size: file.size }, targets: 'all',
+        deviceName: cfg.deviceName, deviceId: cfg.deviceId,
+      }),
+    });
+    const j = await res.json().catch(() => ({}));
+    toast(j.delivered > 0 ? `Envoyé : ${file.name}` : 'Aucun PC en ligne');
+  } catch { toast('Serveur injoignable'); }
+}
+
+$('#sendFiles').onclick = () => { if (!configured()) { openSettings(); return; } $('#fileInput').click(); };
+$('#fileInput').onchange = async (e) => {
+  const files = [...(e.target.files || [])];
+  for (const f of files) await doSendFile(f);
   e.target.value = '';
 };
 

@@ -27,7 +27,13 @@
 
   <button class="primary" id="send">Envoyer le presse-papiers</button>
   <button class="secondary" id="sendImage">Envoyer une image</button>
+  <button class="secondary" id="sendFiles">Envoyer des fichiers</button>
   <input type="file" id="imgInput" accept="image/*" hidden>
+  <input type="file" id="fileInput" multiple hidden>
+  <div id="progress" hidden>
+    <div id="progressLabel"></div>
+    <div class="bar"><div id="progressBar"></div></div>
+  </div>
   <div id="pasteFallback" hidden>
     <div id="pasteBox" contenteditable="true" data-ph="Appui long ici → Coller (ton texte OU ton image)"></div>
     <button class="primary" id="pasteSend">Envoyer</button>

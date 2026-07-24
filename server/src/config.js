@@ -11,6 +11,6 @@ export const config = {
   // Durée de vie d'une image stockée temporairement (ms).
   fileTtlMs: 5 * 60_000,
 
-  // Taille max d'une image de presse-papiers (octets).
-  maxFileBytes: 25 * 1024 * 1024,
+  // Taille max d'un transfert (image ou fichier), octets.
+  maxFileBytes: 100 * 1024 * 1024,
 };

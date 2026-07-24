@@ -21,6 +21,7 @@ public sealed class TrayApp : ApplicationContext
     private bool _connected;
     private List<DeviceInfo> _devices = new();
     private DateTime _suppressUntil = DateTime.MinValue;
+    private string? _lastSavedFile;
 
     public TrayApp()
     {
@@ -49,6 +50,7 @@ public sealed class TrayApp : ApplicationContext
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => ShowMain();
+        _tray.BalloonTipClicked += (_, _) => OpenLastFile();
 
         _watcher = new ClipboardWatcher();
         _watcher.ClipboardChanged += OnLocalClipboardChanged;
@@ -204,6 +206,19 @@ public sealed class TrayApp : ApplicationContext
                     Post(() => ApplyImage(png, from));
                 });
             }
+            else if (type == "file" && clip.TryGetProperty("fileId", out var ffid))
+            {
+                var fileId = ffid.GetString();
+                if (string.IsNullOrEmpty(fileId)) return;
+                var filename = clip.TryGetProperty("meta", out var mt) && mt.TryGetProperty("filename", out var fn)
+                    ? fn.GetString() ?? "fichier" : "fichier";
+                _ = Task.Run(async () =>
+                {
+                    var bytes = await _client.DownloadImage(fileId); // télécharge + déchiffre (octets génériques)
+                    if (bytes is null) return;
+                    Post(() => SaveIncomingFile(bytes, filename, from));
+                });
+            }
         }
         catch { }
     }
@@ -220,6 +235,48 @@ public sealed class TrayApp : ApplicationContext
                 $"Image reçue de {from} — prête à coller (Ctrl+V)", ToolTipIcon.Info);
         }
         catch { }
+    }
+
+    // Enregistre un fichier reçu dans Téléchargements\ClipSync + notification cliquable.
+    private void SaveIncomingFile(byte[] bytes, string filename, string from)
+    {
+        try
+        {
+            var dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "ClipSync");
+            Directory.CreateDirectory(dir);
+            var safe = string.Concat(filename.Split(Path.GetInvalidFileNameChars()));
+            if (string.IsNullOrWhiteSpace(safe)) safe = "fichier";
+            var path = UniquePath(Path.Combine(dir, safe));
+            File.WriteAllBytes(path, bytes);
+            _lastSavedFile = path;
+            _tray.ShowBalloonTip(6000, "ClipSync",
+                $"Fichier reçu de {from} : {Path.GetFileName(path)} (cliquer pour ouvrir)", ToolTipIcon.Info);
+        }
+        catch { }
+    }
+
+    private void OpenLastFile()
+    {
+        try
+        {
+            if (_lastSavedFile is null || !File.Exists(_lastSavedFile)) return;
+            System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{_lastSavedFile}\"");
+        }
+        catch { }
+    }
+
+    private static string UniquePath(string path)
+    {
+        if (!File.Exists(path)) return path;
+        var dir = Path.GetDirectoryName(path)!;
+        var name = Path.GetFileNameWithoutExtension(path);
+        var ext = Path.GetExtension(path);
+        for (int i = 1; ; i++)
+        {
+            var candidate = Path.Combine(dir, $"{name} ({i}){ext}");
+            if (!File.Exists(candidate)) return candidate;
+        }
     }
 
     private void Quit()

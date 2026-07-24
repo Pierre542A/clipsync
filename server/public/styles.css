@@ -52,6 +52,11 @@ button.secondary {
   margin-bottom: 8px;
 }
 button.secondary:active { transform: scale(0.98); }
+
+#progress { margin-bottom: 10px; }
+#progressLabel { font-size: 13px; color: var(--muted); margin-bottom: 6px; word-break: break-word; }
+#progress .bar { height: 8px; background: var(--card2); border-radius: 6px; overflow: hidden; }
+#progressBar { height: 100%; width: 0%; background: var(--accent); transition: width 0.15s; }
 .hint { color: var(--muted); font-size: 13px; text-align: center; margin: 0 0 18px; }
 
 h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 4px 8px; }
