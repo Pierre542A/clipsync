@@ -66,7 +66,7 @@ setInterval(() => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type
 async function handle(msg) {
   switch (msg.type) {
     case 'welcome':
-    case 'devices': renderDevices(msg.devices || []); break;
+    case 'devices': renderDevices(msg.devices || []); renderTargets(msg.devices || []); break;
     case 'clip': await onClip(msg); break;
     case 'sent': break;
     case 'applied': toast(`Collé sur ${msg.by?.name || 'PC'} ✓`); break;
@@ -145,11 +145,24 @@ function renderDevices(devices) {
 }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
+// Remplit le sélecteur « Envoyer à » avec les appareils EN LIGNE (+ Tous).
+function renderTargets(devices) {
+  const sel = $('#target');
+  if (!sel) return;
+  const current = sel.value || 'all';
+  const online = devices.filter((d) => d.online);
+  sel.innerHTML = '<option value="all">Tous les appareils</option>' +
+    online.map((d) => `<option value="${escapeHtml(d.deviceId)}">${escapeHtml(d.name)}</option>`).join('');
+  if ([...sel.options].some((o) => o.value === current)) sel.value = current; // conserve le choix
+}
+
 // --- Envoi (chiffrement) ---------------------------------------------------
 
 async function doSend(text) {
   if (!text) { toast('Rien à envoyer'); return; }
   if (!token || !acct) await ensureKeys();
+  const choice = $('#target')?.value || 'all';
+  const targets = choice === 'all' ? 'all' : [choice];
   const ct = await encryptText(key, text);
   let res;
   try {
@@ -157,7 +170,7 @@ async function doSend(text) {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-account-id': acct, 'x-token': token },
       body: JSON.stringify({
-        contentType: 'text', text: ct, enc: 'v1', targets: 'all',
+        contentType: 'text', text: ct, enc: 'v1', targets,
         deviceName: cfg.deviceName, deviceId: cfg.deviceId,
       }),
     });

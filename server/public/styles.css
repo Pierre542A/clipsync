@@ -68,6 +68,13 @@ h2 { font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spa
   font-family: inherit;
 }
 
+.target-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.target-row label { color: var(--muted); font-size: 14px; white-space: nowrap; }
+.target-row select {
+  flex: 1; background: var(--card); border: 1px solid var(--card2); color: var(--text);
+  border-radius: 12px; padding: 12px; font-size: 16px;
+}
+
 .device { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 12px; padding: 12px 14px; margin-bottom: 8px; }
 .device .name { flex: 1; }
 .device .plat { color: var(--muted); font-size: 12px; }
