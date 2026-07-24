@@ -9,6 +9,11 @@
     <AssemblyName>ClipSync</AssemblyName>
     <RootNamespace>ClipSync</RootNamespace>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>clipsync.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="clipsync.ico" />
+  </ItemGroup>
 
 </Project>

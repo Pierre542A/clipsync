@@ -44,7 +44,7 @@ public sealed class TrayApp : ApplicationContext
 
         _tray = new NotifyIcon
         {
-            Icon = SystemIcons.Application,
+            Icon = LoadAppIcon(),
             Visible = true,
             Text = "ClipSync",
             ContextMenuStrip = menu,
@@ -66,6 +66,25 @@ public sealed class TrayApp : ApplicationContext
     private static bool SafeIsStartupEnabled()
     {
         try { return StartupManager.IsEnabled(); } catch { return false; }
+    }
+
+    // Icône de l'app (le logo embarqué) pour la zone de notification.
+    private static Icon LoadAppIcon()
+    {
+        try
+        {
+            using var s = System.Reflection.Assembly.GetExecutingAssembly()
+                .GetManifestResourceStream("ClipSync.clipsync.ico");
+            if (s != null) return new Icon(s, SystemInformation.SmallIconSize);
+        }
+        catch { }
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (exe != null) { var i = Icon.ExtractAssociatedIcon(exe); if (i != null) return i; }
+        }
+        catch { }
+        return SystemIcons.Application;
     }
 
     // (Re)crée le client réseau avec la config courante.
